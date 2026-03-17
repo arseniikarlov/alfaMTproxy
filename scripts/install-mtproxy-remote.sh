@@ -45,9 +45,16 @@ if [[ -n "${existing_listener}" && "${existing_listener}" != *"mtproto-proxy"* ]
 fi
 
 dashboard_listener="$(ss -ltnp 2>/dev/null | awk -v port=":${DASHBOARD_PORT}$" '$4 ~ port {print $0}')"
-if [[ -n "${dashboard_listener}" && "${dashboard_listener}" != *"mtproxy-dashboard"* ]]; then
-  echo "dashboard port ${DASHBOARD_PORT} is already in use: ${dashboard_listener}" >&2
-  exit 1
+if [[ -n "${dashboard_listener}" ]]; then
+  if systemctl is-active --quiet mtproxy-dashboard; then
+    systemctl stop mtproxy-dashboard || true
+    sleep 1
+    dashboard_listener="$(ss -ltnp 2>/dev/null | awk -v port=":${DASHBOARD_PORT}$" '$4 ~ port {print $0}')"
+  fi
+  if [[ -n "${dashboard_listener}" ]]; then
+    echo "dashboard port ${DASHBOARD_PORT} is already in use: ${dashboard_listener}" >&2
+    exit 1
+  fi
 fi
 
 export DEBIAN_FRONTEND=noninteractive
@@ -116,6 +123,32 @@ def init_db():
             first_seen_ts REAL NOT NULL,
             last_seen_ts REAL NOT NULL,
             hits INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            ip TEXT PRIMARY KEY,
+            country TEXT,
+            region_name TEXT,
+            city TEXT,
+            timezone TEXT,
+            is_mobile INTEGER,
+            is_proxy INTEGER,
+            is_hosting INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            source TEXT,
+            last_checked_ts REAL NOT NULL DEFAULT 0,
+            last_error TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS geo_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         )
         """
     )
@@ -194,9 +227,29 @@ if not os.path.exists(DB_PATH):
         "total_unique_ips": 0,
         "unique_last_24h": 0,
         "unique_last_7d": 0,
+        "recent_clients": [],
     }
 else:
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            ip TEXT PRIMARY KEY,
+            country TEXT,
+            region_name TEXT,
+            city TEXT,
+            timezone TEXT,
+            is_mobile INTEGER,
+            is_proxy INTEGER,
+            is_hosting INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            source TEXT,
+            last_checked_ts REAL NOT NULL DEFAULT 0,
+            last_error TEXT
+        )
+        """
+    )
     now = time.time()
     data = {
         "total_unique_ips": conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0],
@@ -206,6 +259,28 @@ else:
         "unique_last_7d": conn.execute(
             "SELECT COUNT(*) FROM clients WHERE last_seen_ts >= ?", (now - 7 * 86400,)
         ).fetchone()[0],
+        "recent_clients": [
+            {
+                "ip": row["ip"],
+                "last_seen_ts": row["last_seen_ts"],
+                "hits": row["hits"],
+                "city": row["city"] or "",
+                "region_name": row["region_name"] or "",
+                "country": row["country"] or "",
+                "location": ", ".join(
+                    [part for part in [row["city"], row["region_name"], row["country"]] if part]
+                ),
+            }
+            for row in conn.execute(
+                """
+                SELECT c.ip, c.last_seen_ts, c.hits, g.city, g.region_name, g.country
+                FROM clients c
+                LEFT JOIN geo_cache g ON g.ip = c.ip
+                ORDER BY c.last_seen_ts DESC
+                LIMIT 15
+                """
+            ).fetchall()
+        ],
     }
 
 if "--json" in sys.argv:
@@ -225,6 +300,8 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 DB_PATH = "${METRICS_DIR}/clients.sqlite"
 BIND = "${DASHBOARD_BIND}"
@@ -232,6 +309,12 @@ PORT = ${DASHBOARD_PORT}
 TOKEN = "${DASHBOARD_TOKEN}"
 PUBLIC_HOST = "${PUBLIC_HOST}"
 PUBLIC_PORT = ${PUBLIC_PORT}
+GEOIP_BATCH_ENDPOINT = "http://ip-api.com/batch?fields=status,message,query,country,regionName,city,timezone,mobile,proxy,hosting&lang=ru"
+GEOIP_TIMEOUT = 4
+GEOIP_BATCH_SIZE = 15
+GEOIP_SUCCESS_TTL = 30 * 86400
+GEOIP_ERROR_TTL = 6 * 3600
+GEOIP_MIN_BATCH_INTERVAL = 5
 
 HTML = """<!doctype html>
 <html lang="ru">
@@ -427,6 +510,34 @@ HTML = """<!doctype html>
       color: var(--muted);
       font-weight: 600;
     }
+    .location-main {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .location-sub {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
     .status {
       display: inline-flex;
       align-items: center;
@@ -510,12 +621,13 @@ HTML = """<!doctype html>
           <thead>
             <tr>
               <th>IP</th>
+              <th>Город / страна</th>
               <th>Последняя активность</th>
               <th>Хитов</th>
             </tr>
           </thead>
           <tbody id="recent-body">
-            <tr><td colspan="3">Пока пусто</td></tr>
+            <tr><td colspan="4">Пока пусто</td></tr>
           </tbody>
         </table>
       </section>
@@ -582,12 +694,27 @@ HTML = """<!doctype html>
     function renderRecent(items) {
       const body = document.getElementById('recent-body');
       if (!items.length) {
-        body.innerHTML = '<tr><td colspan="3">Пока пусто</td></tr>';
+        body.innerHTML = '<tr><td colspan="4">Пока пусто</td></tr>';
         return;
       }
+      const renderLocation = (item) => {
+        const main = item.location || (item.geo_status === 'lookup_pending' ? 'Определяется...' : 'Нет данных');
+        const parts = [];
+        if (item.timezone) parts.push(item.timezone);
+        const badges = [];
+        if (item.is_mobile) badges.push('mobile');
+        if (item.is_proxy) badges.push('proxy');
+        if (item.is_hosting) badges.push('hosting');
+        return (
+          '<div class="location-main">' + main + '</div>' +
+          (parts.length ? '<div class="location-sub">' + parts.join(' • ') + '</div>' : '') +
+          (badges.length ? '<div class="badges">' + badges.map((badge) => '<span class="badge">' + badge + '</span>').join('') + '</div>' : '')
+        );
+      };
       body.innerHTML = items.map((item) => (
         '<tr>' +
           '<td>' + item.ip + '</td>' +
+          '<td>' + renderLocation(item) + '</td>' +
           '<td>' + formatTs(item.last_seen_ts) + '</td>' +
           '<td>' + item.hits + '</td>' +
         '</tr>'
@@ -662,6 +789,234 @@ HTML = """<!doctype html>
 """
 
 
+def ensure_db(conn):
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clients (
+            ip TEXT PRIMARY KEY,
+            first_seen_ts REAL NOT NULL,
+            last_seen_ts REAL NOT NULL,
+            hits INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            ip TEXT PRIMARY KEY,
+            country TEXT,
+            region_name TEXT,
+            city TEXT,
+            timezone TEXT,
+            is_mobile INTEGER,
+            is_proxy INTEGER,
+            is_hosting INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            source TEXT,
+            last_checked_ts REAL NOT NULL DEFAULT 0,
+            last_error TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS geo_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def get_meta(conn, key, default=""):
+    row = conn.execute("SELECT value FROM geo_meta WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def set_meta(conn, key, value):
+    conn.execute(
+        """
+        INSERT INTO geo_meta(key, value)
+        VALUES(?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (key, value),
+    )
+    conn.commit()
+
+
+def geo_row_to_dict(row):
+    if row is None:
+        return None
+    return {
+        "ip": row["ip"],
+        "country": row["country"] or "",
+        "region_name": row["region_name"] or "",
+        "city": row["city"] or "",
+        "timezone": row["timezone"] or "",
+        "is_mobile": bool(row["is_mobile"]),
+        "is_proxy": bool(row["is_proxy"]),
+        "is_hosting": bool(row["is_hosting"]),
+        "status": row["status"],
+        "last_checked_ts": row["last_checked_ts"],
+        "last_error": row["last_error"] or "",
+    }
+
+
+def fetch_geo_map(conn, ips):
+    if not ips:
+        return {}
+    placeholders = ",".join("?" for _ in ips)
+    rows = conn.execute(
+        f"""
+        SELECT ip, country, region_name, city, timezone, is_mobile, is_proxy, is_hosting,
+               status, last_checked_ts, last_error
+        FROM geo_cache
+        WHERE ip IN ({placeholders})
+        """,
+        ips,
+    ).fetchall()
+    return {row["ip"]: geo_row_to_dict(row) for row in rows}
+
+
+def geo_cache_is_stale(geo, now):
+    if geo is None:
+        return True
+    ttl = GEOIP_SUCCESS_TTL if geo["status"] == "success" else GEOIP_ERROR_TTL
+    return geo["last_checked_ts"] < now - ttl
+
+
+def store_geo_success(conn, ip, payload, now):
+    conn.execute(
+        """
+        INSERT INTO geo_cache(
+            ip, country, region_name, city, timezone, is_mobile, is_proxy, is_hosting,
+            status, source, last_checked_ts, last_error
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'success', 'ip-api', ?, NULL)
+        ON CONFLICT(ip) DO UPDATE SET
+            country = excluded.country,
+            region_name = excluded.region_name,
+            city = excluded.city,
+            timezone = excluded.timezone,
+            is_mobile = excluded.is_mobile,
+            is_proxy = excluded.is_proxy,
+            is_hosting = excluded.is_hosting,
+            status = 'success',
+            source = 'ip-api',
+            last_checked_ts = excluded.last_checked_ts,
+            last_error = NULL
+        """,
+        (
+            ip,
+            payload.get("country") or "",
+            payload.get("regionName") or "",
+            payload.get("city") or "",
+            payload.get("timezone") or "",
+            1 if payload.get("mobile") else 0,
+            1 if payload.get("proxy") else 0,
+            1 if payload.get("hosting") else 0,
+            now,
+        ),
+    )
+
+
+def store_geo_error(conn, ip, message, now):
+    conn.execute(
+        """
+        INSERT INTO geo_cache(
+            ip, country, region_name, city, timezone, is_mobile, is_proxy, is_hosting,
+            status, source, last_checked_ts, last_error
+        )
+        VALUES(?, '', '', '', '', 0, 0, 0, 'error', 'ip-api', ?, ?)
+        ON CONFLICT(ip) DO UPDATE SET
+            status = 'error',
+            source = 'ip-api',
+            last_checked_ts = excluded.last_checked_ts,
+            last_error = excluded.last_error
+        """,
+        (ip, now, message[:250]),
+    )
+
+
+def maybe_lookup_geo(conn, ips, now):
+    batch = []
+    for ip in ips:
+        if ip and ip not in batch:
+            batch.append(ip)
+    batch = batch[:GEOIP_BATCH_SIZE]
+    if not batch:
+        return
+
+    resume_ts = float(get_meta(conn, "geo_lookup_resume_ts", "0") or 0)
+    if now < resume_ts:
+        return
+
+    last_batch_ts = float(get_meta(conn, "geo_lookup_last_batch_ts", "0") or 0)
+    if now - last_batch_ts < GEOIP_MIN_BATCH_INTERVAL:
+        return
+
+    set_meta(conn, "geo_lookup_last_batch_ts", str(now))
+
+    req = Request(
+        GEOIP_BATCH_ENDPOINT,
+        data=json.dumps([{"query": ip} for ip in batch]).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "mtproxy-dashboard/1.1",
+        },
+    )
+
+    try:
+        with urlopen(req, timeout=GEOIP_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            rl = resp.headers.get("X-Rl")
+            ttl = resp.headers.get("X-Ttl")
+            if rl and ttl and rl.isdigit() and ttl.isdigit() and int(rl) <= 0:
+                set_meta(conn, "geo_lookup_resume_ts", str(now + int(ttl)))
+    except HTTPError as exc:
+        ttl = exc.headers.get("X-Ttl") if exc.headers else None
+        if exc.code == 429:
+            wait_for = int(ttl) if ttl and ttl.isdigit() else 60
+            set_meta(conn, "geo_lookup_resume_ts", str(now + wait_for))
+        for ip in batch:
+            store_geo_error(conn, ip, f"http_{exc.code}", now)
+        conn.commit()
+        return
+    except (URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        for ip in batch:
+            store_geo_error(conn, ip, str(exc), now)
+        conn.commit()
+        return
+
+    seen = set()
+    for item in payload if isinstance(payload, list) else []:
+        ip = item.get("query")
+        if not ip:
+            continue
+        seen.add(ip)
+        if item.get("status") == "success":
+            store_geo_success(conn, ip, item, now)
+        else:
+            store_geo_error(conn, ip, item.get("message", "lookup_failed"), now)
+
+    for ip in batch:
+        if ip not in seen:
+            store_geo_error(conn, ip, "no_response", now)
+
+    conn.commit()
+
+
+def format_location(geo):
+    if not geo or geo["status"] != "success":
+        return ""
+    parts = [geo["city"], geo["region_name"], geo["country"]]
+    parts = [part for part in parts if part]
+    return ", ".join(parts)
+
+
 def query_data():
     now = time.time()
     if not os.path.exists(DB_PATH):
@@ -675,9 +1030,18 @@ def query_data():
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    ensure_db(conn)
+
     recent_rows = conn.execute(
         "SELECT ip, last_seen_ts, hits FROM clients ORDER BY last_seen_ts DESC LIMIT 15"
     ).fetchall()
+    recent_ips = [row["ip"] for row in recent_rows]
+    geo_map = fetch_geo_map(conn, recent_ips)
+
+    lookup_needed = [ip for ip in recent_ips if geo_cache_is_stale(geo_map.get(ip), now)]
+    maybe_lookup_geo(conn, lookup_needed, now)
+    geo_map = fetch_geo_map(conn, recent_ips)
+
     return {
         "total_unique_ips": conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0],
         "unique_last_24h": conn.execute(
@@ -694,6 +1058,15 @@ def query_data():
                     row["last_seen_ts"], tz=timezone.utc
                 ).isoformat(),
                 "hits": row["hits"],
+                "city": (geo_map.get(row["ip"]) or {}).get("city", ""),
+                "region_name": (geo_map.get(row["ip"]) or {}).get("region_name", ""),
+                "country": (geo_map.get(row["ip"]) or {}).get("country", ""),
+                "timezone": (geo_map.get(row["ip"]) or {}).get("timezone", ""),
+                "is_mobile": (geo_map.get(row["ip"]) or {}).get("is_mobile", False),
+                "is_proxy": (geo_map.get(row["ip"]) or {}).get("is_proxy", False),
+                "is_hosting": (geo_map.get(row["ip"]) or {}).get("is_hosting", False),
+                "geo_status": (geo_map.get(row["ip"]) or {}).get("status", "lookup_pending"),
+                "location": format_location(geo_map.get(row["ip"])),
             }
             for row in recent_rows
         ],
