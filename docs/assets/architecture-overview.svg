@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1800" y2="1180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#0F172A" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font: 700 46px Arial, Helvetica, sans-serif; fill: #0F172A; }
+      .subtitle { font: 400 20px Arial, Helvetica, sans-serif; fill: #475569; }
+      .group-title { font: 700 24px Arial, Helvetica, sans-serif; fill: #0F172A; }
+      .card-title { font: 700 20px Arial, Helvetica, sans-serif; fill: #0F172A; }
+      .card-text { font: 400 15px Arial, Helvetica, sans-serif; fill: #475569; }
+      .pill { font: 700 13px Arial, Helvetica, sans-serif; fill: #0F172A; }
+      .label { font: 700 14px Arial, Helvetica, sans-serif; fill: #334155; }
+      .note { font: 400 16px Arial, Helvetica, sans-serif; fill: #475569; }
+      .border { stroke: #CBD5E1; stroke-width: 2; }
+      .arrow { stroke: #475569; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .arrow-soft { stroke: #64748B; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1180" rx="36" fill="url(#bg)"/>
+
+  <text x="70" y="82" class="title">MTProxy Infra Architecture</text>
+  <text x="70" y="118" class="subtitle">Раскатка, runtime-сервисы, сбор метрики и браузерный live-dashboard в одной схеме</text>
+
+  <rect x="70" y="170" width="320" height="340" rx="28" fill="#E0F2FE" class="border" filter="url(#shadow)"/>
+  <text x="100" y="212" class="group-title">Локальная машина</text>
+
+  <rect x="100" y="245" width="260" height="74" rx="20" fill="#F8FDFF" stroke="#0284C7" stroke-width="2.5"/>
+  <text x="128" y="285" class="card-title">.mtproxy.env</text>
+  <text x="128" y="306" class="card-text">host, port, workers, token</text>
+
+  <rect x="100" y="350" width="260" height="90" rx="20" fill="#F8FDFF" stroke="#0284C7" stroke-width="2.5"/>
+  <text x="128" y="390" class="card-title">deploy-mtproxy.sh</text>
+  <text x="128" y="412" class="card-text">копирует installer и запускает</text>
+
+  <rect x="100" y="468" width="260" height="74" rx="20" fill="#F8FDFF" stroke="#0284C7" stroke-width="2.5"/>
+  <text x="128" y="508" class="card-title">mtproxy-metric.sh</text>
+  <text x="128" y="529" class="card-text">читает метрику по SSH</text>
+
+  <rect x="70" y="550" width="320" height="150" rx="28" fill="#DCFCE7" class="border" filter="url(#shadow)"/>
+  <text x="100" y="592" class="group-title">GitHub</text>
+  <rect x="100" y="620" width="260" height="54" rx="18" fill="#F7FEF9" stroke="#16A34A" stroke-width="2.5"/>
+  <text x="128" y="654" class="card-title">arseniikarlov/alfaMTproxy</text>
+
+  <rect x="430" y="170" width="950" height="850" rx="34" fill="#FFFFFF" class="border" filter="url(#shadow)"/>
+  <text x="470" y="214" class="group-title">Сервер MTProxy</text>
+
+  <rect x="470" y="240" width="870" height="158" rx="26" fill="#FEF3C7" stroke="#D97706" stroke-width="2.5"/>
+  <text x="500" y="280" class="group-title">Установка и конфиг</text>
+
+  <rect x="500" y="305" width="250" height="68" rx="18" fill="#FFF9EA" stroke="#D97706" stroke-width="2"/>
+  <text x="525" y="345" class="card-title">install-mtproxy-remote.sh</text>
+
+  <rect x="780" y="305" width="170" height="68" rx="18" fill="#FFF9EA" stroke="#D97706" stroke-width="2"/>
+  <text x="807" y="345" class="card-title">proxy secret</text>
+
+  <rect x="970" y="305" width="170" height="68" rx="18" fill="#FFF9EA" stroke="#D97706" stroke-width="2"/>
+  <text x="986" y="345" class="card-title">dashboard token</text>
+
+  <rect x="1160" y="305" width="150" height="68" rx="18" fill="#FFF9EA" stroke="#D97706" stroke-width="2"/>
+  <text x="1184" y="338" class="card-title">Telegram</text>
+  <text x="1184" y="359" class="card-text">proxy data</text>
+
+  <rect x="470" y="430" width="870" height="210" rx="26" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2.5"/>
+  <text x="500" y="470" class="group-title">Runtime services</text>
+
+  <rect x="500" y="505" width="220" height="92" rx="20" fill="#F7F4FF" stroke="#7C3AED" stroke-width="2"/>
+  <text x="527" y="548" class="card-title">mtproxy.service</text>
+  <text x="527" y="571" class="card-text">основной процесс прокси</text>
+
+  <rect x="750" y="505" width="250" height="92" rx="20" fill="#F7F4FF" stroke="#7C3AED" stroke-width="2"/>
+  <text x="775" y="548" class="card-title">unique-collector.service</text>
+  <text x="775" y="571" class="card-text">сбор уникальных IP</text>
+
+  <rect x="1030" y="505" width="280" height="92" rx="20" fill="#F7F4FF" stroke="#7C3AED" stroke-width="2"/>
+  <text x="1058" y="548" class="card-title">dashboard.service</text>
+  <text x="1058" y="571" class="card-text">HTML + JSON API</text>
+
+  <rect x="520" y="618" width="220" height="54" rx="18" fill="#EFEAFE" stroke="#7C3AED" stroke-width="2"/>
+  <text x="585" y="652" class="card-title">MTProxy :443</text>
+
+  <rect x="780" y="618" width="220" height="54" rx="18" fill="#EFEAFE" stroke="#7C3AED" stroke-width="2"/>
+  <text x="823" y="652" class="card-title">HTTP stats :2398</text>
+
+  <rect x="470" y="675" width="400" height="300" rx="26" fill="#FAE8FF" stroke="#C026D3" stroke-width="2.5"/>
+  <text x="500" y="715" class="group-title">Data layer</text>
+
+  <rect x="500" y="750" width="170" height="78" rx="20" fill="#FFF6FF" stroke="#C026D3" stroke-width="2"/>
+  <text x="525" y="793" class="card-title">tcpdump</text>
+  <text x="525" y="815" class="card-text">ловит SYN на :443</text>
+
+  <rect x="700" y="742" width="140" height="95" rx="22" fill="#FFF6FF" stroke="#C026D3" stroke-width="2"/>
+  <text x="724" y="783" class="card-title">clients</text>
+  <text x="728" y="807" class="card-title">.sqlite</text>
+
+  <rect x="500" y="862" width="340" height="70" rx="20" fill="#FFF6FF" stroke="#C026D3" stroke-width="2"/>
+  <text x="526" y="904" class="card-title">mtproxy-unique-stats</text>
+  <text x="526" y="925" class="card-text">CLI чтения агрегированной метрики</text>
+
+  <rect x="910" y="675" width="430" height="300" rx="26" fill="#FEE2E2" stroke="#DC2626" stroke-width="2.5"/>
+  <text x="940" y="715" class="group-title">Web layer</text>
+
+  <rect x="940" y="752" width="370" height="82" rx="20" fill="#FFF5F5" stroke="#DC2626" stroke-width="2"/>
+  <text x="968" y="796" class="card-title">Dashboard UI :18080</text>
+  <text x="968" y="819" class="card-text">страница для браузера с автообновлением</text>
+
+  <rect x="940" y="860" width="370" height="82" rx="20" fill="#FFF5F5" stroke="#DC2626" stroke-width="2"/>
+  <text x="968" y="904" class="card-title">GET /api/metrics</text>
+  <text x="968" y="927" class="card-text">JSON c total / 24h / 7d и recent clients</text>
+
+  <rect x="1430" y="240" width="300" height="300" rx="28" fill="#F8FAFC" class="border" filter="url(#shadow)"/>
+  <text x="1460" y="282" class="group-title">Пользователи</text>
+
+  <rect x="1460" y="320" width="240" height="78" rx="20" fill="#FFFFFF" stroke="#475569" stroke-width="2"/>
+  <text x="1488" y="363" class="card-title">Telegram clients</text>
+  <text x="1488" y="385" class="card-text">MTProto connection</text>
+
+  <rect x="1460" y="430" width="240" height="78" rx="20" fill="#FFFFFF" stroke="#475569" stroke-width="2"/>
+  <text x="1488" y="473" class="card-title">Browser</text>
+  <text x="1488" y="495" class="card-text">UI + polling каждые 5 сек</text>
+
+  <rect x="1430" y="610" width="300" height="180" rx="28" fill="#CFFAFE" class="border" filter="url(#shadow)"/>
+  <text x="1460" y="652" class="group-title">Сеть Telegram</text>
+  <rect x="1460" y="688" width="240" height="68" rx="18" fill="#ECFEFF" stroke="#0891B2" stroke-width="2.5"/>
+  <text x="1530" y="728" class="card-title">Telegram DCs</text>
+
+  <path d="M 230 319 L 230 350" class="arrow"/>
+  <path d="M 230 440 L 230 468" class="arrow"/>
+  <path d="M 230 620 L 230 595 L 230 595 L 230 550" class="arrow-soft"/>
+
+  <path d="M 360 395 C 405 395, 430 395, 500 339" class="arrow"/>
+  <text x="395" y="370" class="label">SSH deploy</text>
+
+  <path d="M 360 505 C 470 505, 400 900, 500 897" class="arrow"/>
+  <text x="405" y="846" class="label">SSH metric</text>
+
+  <path d="M 360 647 C 420 647, 430 647, 500 339" class="arrow-soft"/>
+  <text x="405" y="622" class="label">repo sync</text>
+
+  <path d="M 750 339 L 780 339" class="arrow"/>
+  <path d="M 950 339 L 970 339" class="arrow"/>
+  <path d="M 1140 339 L 1160 339" class="arrow"/>
+
+  <path d="M 625 373 C 625 420, 610 450, 610 505" class="arrow"/>
+  <path d="M 625 373 C 625 438, 840 450, 875 505" class="arrow"/>
+  <path d="M 625 373 C 625 438, 1130 450, 1170 505" class="arrow"/>
+
+  <path d="M 865 373 C 865 420, 610 450, 610 505" class="arrow-soft"/>
+  <path d="M 1055 373 C 1055 420, 1170 450, 1170 505" class="arrow-soft"/>
+  <path d="M 1235 373 C 1235 420, 610 450, 610 505" class="arrow-soft"/>
+
+  <path d="M 610 597 L 630 618" class="arrow"/>
+  <path d="M 610 597 C 610 630, 820 630, 890 618" class="arrow-soft"/>
+
+  <path d="M 875 597 C 875 660, 585 690, 585 750" class="arrow"/>
+  <path d="M 1170 597 C 1170 650, 1170 700, 1125 752" class="arrow"/>
+  <path d="M 1170 597 C 1170 690, 1170 760, 1125 860" class="arrow"/>
+  <path d="M 1125 834 C 1125 846, 770 846, 770 790" class="arrow-soft"/>
+
+  <path d="M 585 828 L 770 828" class="arrow"/>
+  <path d="M 770 837 L 770 862" class="arrow"/>
+
+  <path d="M 1700 359 C 1740 359, 1760 645, 1700 722" class="arrow-soft"/>
+  <path d="M 1460 359 C 1350 359, 1270 520, 740 645" class="arrow"/>
+  <text x="1290" y="333" class="label">MTProto / 443</text>
+
+  <path d="M 1460 469 C 1380 469, 1360 780, 1310 793" class="arrow"/>
+  <path d="M 1460 469 C 1380 469, 1360 900, 1310 901" class="arrow"/>
+  <text x="1344" y="447" class="label">token + polling</text>
+
+  <rect x="70" y="1040" width="1660" height="90" rx="24" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <text x="100" y="1080" class="note">Идея схемы: прокси, сборщик метрики и web-dashboard разделены на уровне сервисов. Падение UI не ломает MTProxy, а метрика хранится отдельно в SQLite.</text>
+  <text x="100" y="1108" class="note">Считаются уникальные клиентские IP по входящим TCP SYN на порт прокси. Для multi-node сценария дальше можно выносить storage и dashboard в отдельный слой.</text>
+</svg>
