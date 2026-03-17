@@ -1,10 +1,10 @@
 # MTProxy Infra
 
-Воспроизводимая раскатка `Telegram MTProxy` на новый сервер с метрикой уникальных клиентских `IP`.
+Воспроизводимая раскатка `Telegram MTProxy` на новый сервер с метрикой уникальных клиентских `IP` и браузерным live-дашбордом.
 
 Что внутри:
 
-- `scripts/install-mtproxy-remote.sh` — ставит `MTProxy`, `systemd`-юниты и сборщик метрики
+- `scripts/install-mtproxy-remote.sh` — ставит `MTProxy`, `systemd`-юниты, сборщик метрики и HTTP-дашборд
 - `scripts/deploy-mtproxy.sh` — локально копирует installer на сервер и запускает его по `SSH`
 - `scripts/mtproxy-metric.sh` — локально читает метрику с сервера
 - `docs/mtproxy.md` — короткая инструкция

@@ -11,6 +11,7 @@
 
 - установка `MTProxy` из официального репозитория
 - `systemd`-юниты для прокси и сборщика метрики
+- отдельный HTTP-дашборд с автообновлением
 - сбор уникальных IP по входящим TCP SYN на порт прокси
 - команда просмотра метрики
 
@@ -35,8 +36,10 @@ cp .mtproxy.env.example .mtproxy.env
 - `PUBLIC_PORT`
 - `INTERNAL_PORT`
 - `WORKERS`
+- `DASHBOARD_PORT`
 
 Если нужен фиксированный `secret`, можно перед раскаткой задать `MTPROXY_SECRET`.
+Если нужен фиксированный токен для веб-дашборда, можно задать `MTPROXY_DASHBOARD_TOKEN`.
 
 Если хочешь сохранить ту же ссылку в Telegram при переносе на новый сервер:
 
@@ -63,7 +66,16 @@ make mtproxy-deploy HOST=root@SERVER_IP
 На выходе скрипт печатает:
 
 - готовую ссылку `t.me/proxy`
+- ссылку на web-дашборд
 - текущий снимок метрики
+
+Дашборд открывается по ссылке вида:
+
+```text
+http://SERVER_IP:DASHBOARD_PORT/?token=YOUR_DASHBOARD_TOKEN
+```
+
+Токен можно передавать один раз в URL: страница сохранит его в `sessionStorage` и уберёт из адресной строки.
 
 ## Просмотр метрики
 
@@ -87,6 +99,12 @@ make mtproxy-metric ARGS=--json
 mtproxy-unique-stats
 mtproxy-unique-stats --json
 ```
+
+В браузере:
+
+- открой ссылку, которую печатает installer
+- страница сама обновляет данные каждые 5 секунд
+- API доступно на `/api/metrics`
 
 ## Что считается
 

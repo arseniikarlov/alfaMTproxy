@@ -16,6 +16,7 @@ PUBLIC_HOST="${PUBLIC_HOST:-}"
 PUBLIC_PORT="${PUBLIC_PORT:-443}"
 INTERNAL_PORT="${INTERNAL_PORT:-2398}"
 WORKERS="${WORKERS:-1}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-18080}"
 
 if [[ -z "${TARGET}" ]]; then
   echo "usage: $0 user@host" >&2
@@ -41,10 +42,15 @@ REMOTE_ENV=(
   "PUBLIC_PORT=$(printf '%q' "${PUBLIC_PORT}")"
   "INTERNAL_PORT=$(printf '%q' "${INTERNAL_PORT}")"
   "WORKERS=$(printf '%q' "${WORKERS}")"
+  "DASHBOARD_PORT=$(printf '%q' "${DASHBOARD_PORT}")"
 )
 
 if [[ -n "${MTPROXY_SECRET:-}" ]]; then
   REMOTE_ENV+=("MTPROXY_SECRET=$(printf '%q' "${MTPROXY_SECRET}")")
+fi
+
+if [[ -n "${MTPROXY_DASHBOARD_TOKEN:-}" ]]; then
+  REMOTE_ENV+=("MTPROXY_DASHBOARD_TOKEN=$(printf '%q' "${MTPROXY_DASHBOARD_TOKEN}")")
 fi
 
 ssh "${SSH_OPTS[@]}" "${TARGET}" "$(printf '%s ' "${REMOTE_ENV[@]}") bash ${REMOTE_INSTALLER}"
