@@ -13,6 +13,7 @@
 - `systemd`-юниты для прокси и сборщика метрики
 - отдельный HTTP-дашборд с автообновлением
 - watchdog c `systemd timer`, который сам проверяет и переподнимает сервисы
+- Telegram-alerting через Bot API при падении и восстановлении
 - сбор уникальных IP по входящим TCP SYN на порт прокси
 - GeoIP city/country enrichment для последних подключений
 - команда просмотра метрики
@@ -43,6 +44,10 @@ cp .mtproxy.env.example .mtproxy.env
 
 Если нужен фиксированный `secret`, можно перед раскаткой задать `MTPROXY_SECRET`.
 Если нужен фиксированный токен для веб-дашборда, можно задать `MTPROXY_DASHBOARD_TOKEN`.
+Если нужны алерты в Telegram, можно задать:
+
+- `MTPROXY_ALERT_BOT_TOKEN`
+- `MTPROXY_ALERT_CHAT_ID`
 
 Если хочешь сохранить ту же ссылку в Telegram при переносе на новый сервер:
 
@@ -111,6 +116,12 @@ systemctl status mtproxy-watchdog.timer --no-pager
 systemctl status mtproxy-watchdog.service --no-pager
 journalctl -u mtproxy-watchdog.service -n 50 --no-pager
 ```
+
+При заданных `MTPROXY_ALERT_BOT_TOKEN` и `MTPROXY_ALERT_CHAT_ID` watchdog:
+
+- шлёт один alert при переходе в `unhealthy`
+- не спамит одинаковым сообщением каждую минуту
+- шлёт recovery при возврате в `healthy`
 
 В браузере:
 

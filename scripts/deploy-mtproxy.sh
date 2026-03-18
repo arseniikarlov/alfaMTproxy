@@ -53,4 +53,12 @@ if [[ -n "${MTPROXY_DASHBOARD_TOKEN:-}" ]]; then
   REMOTE_ENV+=("MTPROXY_DASHBOARD_TOKEN=$(printf '%q' "${MTPROXY_DASHBOARD_TOKEN}")")
 fi
 
+if [[ -n "${MTPROXY_ALERT_BOT_TOKEN:-}" ]]; then
+  REMOTE_ENV+=("MTPROXY_ALERT_BOT_TOKEN=$(printf '%q' "${MTPROXY_ALERT_BOT_TOKEN}")")
+fi
+
+if [[ -n "${MTPROXY_ALERT_CHAT_ID:-}" ]]; then
+  REMOTE_ENV+=("MTPROXY_ALERT_CHAT_ID=$(printf '%q' "${MTPROXY_ALERT_CHAT_ID}")")
+fi
+
 ssh "${SSH_OPTS[@]}" "${TARGET}" "$(printf '%s ' "${REMOTE_ENV[@]}") bash ${REMOTE_INSTALLER}"

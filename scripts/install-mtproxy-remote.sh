@@ -12,11 +12,14 @@ METRICS_DIR="${METRICS_DIR:-/var/lib/mtproxy-metrics}"
 SECRET_DIR="${SECRET_DIR:-/etc/mtproxy}"
 SECRET_FILE="${SECRET_FILE:-${SECRET_DIR}/secret}"
 DASHBOARD_TOKEN_FILE="${DASHBOARD_TOKEN_FILE:-${SECRET_DIR}/dashboard-token}"
+ALERT_BOT_TOKEN_FILE="${SECRET_DIR}/alert-bot-token"
+ALERT_CHAT_ID_FILE="${SECRET_DIR}/alert-chat-id"
 SYSCTL_FILE="/etc/sysctl.d/60-mtproxy-reliability.conf"
 COLLECTOR_BIN="/usr/local/bin/mtproxy_unique_collector.py"
 STATS_BIN="/usr/local/bin/mtproxy-unique-stats"
 DASHBOARD_BIN="/usr/local/bin/mtproxy-dashboard"
 WATCHDOG_BIN="/usr/local/bin/mtproxy-watchdog"
+WATCHDOG_STATE_FILE="${METRICS_DIR}/watchdog-state"
 COLLECTOR_SERVICE="/etc/systemd/system/mtproxy-unique-collector.service"
 MTPROXY_SERVICE="/etc/systemd/system/mtproxy.service"
 DASHBOARD_SERVICE="/etc/systemd/system/mtproxy-dashboard.service"
@@ -103,6 +106,16 @@ fi
 printf '%s' "${SECRET}" > "${SECRET_FILE}"
 printf '%s' "${DASHBOARD_TOKEN}" > "${DASHBOARD_TOKEN_FILE}"
 chmod 600 "${SECRET_FILE}" "${DASHBOARD_TOKEN_FILE}"
+
+if [[ -n "${MTPROXY_ALERT_BOT_TOKEN:-}" ]]; then
+  printf '%s' "${MTPROXY_ALERT_BOT_TOKEN}" > "${ALERT_BOT_TOKEN_FILE}"
+  chmod 600 "${ALERT_BOT_TOKEN_FILE}"
+fi
+
+if [[ -n "${MTPROXY_ALERT_CHAT_ID:-}" ]]; then
+  printf '%s' "${MTPROXY_ALERT_CHAT_ID}" > "${ALERT_CHAT_ID_FILE}"
+  chmod 600 "${ALERT_CHAT_ID_FILE}"
+fi
 
 SERVER_IP_REGEX="${SERVER_IP//./\\.}"
 
@@ -1199,9 +1212,13 @@ cat > "${WATCHDOG_BIN}" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
 
+PUBLIC_HOST="${PUBLIC_HOST}"
 PUBLIC_PORT="${PUBLIC_PORT}"
 INTERNAL_PORT="${INTERNAL_PORT}"
 DASHBOARD_PORT="${DASHBOARD_PORT}"
+ALERT_BOT_TOKEN_FILE="${ALERT_BOT_TOKEN_FILE}"
+ALERT_CHAT_ID_FILE="${ALERT_CHAT_ID_FILE}"
+WATCHDOG_STATE_FILE="${WATCHDOG_STATE_FILE}"
 
 log() {
   logger -t mtproxy-watchdog "\$*"
@@ -1225,6 +1242,54 @@ restart_unit() {
   systemctl restart "\${unit}"
 }
 
+send_telegram() {
+  local message="\$1"
+  local bot_token chat_id
+
+  if [[ ! -s "${ALERT_BOT_TOKEN_FILE}" || ! -s "${ALERT_CHAT_ID_FILE}" ]]; then
+    return 0
+  fi
+
+  bot_token="\$(cat "${ALERT_BOT_TOKEN_FILE}")"
+  chat_id="\$(cat "${ALERT_CHAT_ID_FILE}")"
+
+  if ! curl -fsS --max-time 10 \
+    --data-urlencode "chat_id=\${chat_id}" \
+    --data-urlencode "text=\${message}" \
+    "https://api.telegram.org/bot\${bot_token}/sendMessage" >/dev/null; then
+    log "telegram alert send failed"
+  fi
+}
+
+set_state_and_notify() {
+  local next_state="\$1"
+  shift
+  local previous_state=""
+  local message=""
+  local item
+
+  if [[ -f "${WATCHDOG_STATE_FILE}" ]]; then
+    previous_state="\$(cat "${WATCHDOG_STATE_FILE}")"
+  fi
+
+  printf '%s' "\${next_state}" > "${WATCHDOG_STATE_FILE}"
+
+  if [[ "\${next_state}" == "unhealthy" && "\${previous_state}" != "unhealthy" ]]; then
+    message="[mtproxy] ALERT \${PUBLIC_HOST} \$(date -Is)"
+    for item in "\$@"; do
+      message="\${message}"$'\n'"- \${item}"
+    done
+    send_telegram "\${message}"
+    return
+  fi
+
+  if [[ "\${next_state}" == "healthy" && "\${previous_state}" == "unhealthy" ]]; then
+    send_telegram "[mtproxy] RECOVERED \${PUBLIC_HOST} \$(date -Is)"
+  fi
+}
+
+issues=()
+
 if ! systemctl is-active --quiet mtproxy; then
   restart_unit mtproxy "inactive"
 elif ! is_listening "${PUBLIC_PORT}" || ! is_listening "${INTERNAL_PORT}" || ! http_ok "http://127.0.0.1:${INTERNAL_PORT}/stats"; then
@@ -1245,19 +1310,25 @@ sleep 2
 
 if ! systemctl is-active --quiet mtproxy || ! is_listening "${PUBLIC_PORT}" || ! is_listening "${INTERNAL_PORT}" || ! http_ok "http://127.0.0.1:${INTERNAL_PORT}/stats"; then
   log "mtproxy remains unhealthy after remediation"
-  exit 1
+  issues+=("mtproxy remains unhealthy after remediation")
 fi
 
 if ! systemctl is-active --quiet mtproxy-unique-collector; then
   log "mtproxy-unique-collector remains unhealthy after remediation"
-  exit 1
+  issues+=("mtproxy-unique-collector remains unhealthy after remediation")
 fi
 
 if ! systemctl is-active --quiet mtproxy-dashboard || ! is_listening "${DASHBOARD_PORT}" || ! http_ok "http://127.0.0.1:${DASHBOARD_PORT}/healthz"; then
   log "mtproxy-dashboard remains unhealthy after remediation"
+  issues+=("mtproxy-dashboard remains unhealthy after remediation")
+fi
+
+if (( \${#issues[@]} > 0 )); then
+  set_state_and_notify unhealthy "\${issues[@]}"
   exit 1
 fi
 
+set_state_and_notify healthy
 log "all checks passed"
 SH
 chmod 755 "${WATCHDOG_BIN}"

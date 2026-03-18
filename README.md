@@ -1,6 +1,6 @@
 # MTProxy Infra
 
-Воспроизводимая раскатка `Telegram MTProxy` на новый сервер с метрикой уникальных клиентских `IP`, GeoIP-городом, браузерным live-дашбордом и базовым auto-heal watchdog.
+Воспроизводимая раскатка `Telegram MTProxy` на новый сервер с метрикой уникальных клиентских `IP`, GeoIP-городом, браузерным live-дашбордом, базовым auto-heal watchdog и Telegram-alerting.
 
 <p align="center">
   <a href="docs/architecture.md">
@@ -23,6 +23,7 @@
 - `mtproxy-unique-collector.service` — сбор уникальных IP
 - `mtproxy-dashboard.service` — web UI и API
 - `mtproxy-watchdog.service` + `mtproxy-watchdog.timer` — периодическая health-проверка и auto-heal
+- Telegram-alerts — уведомления о падении и восстановлении через Bot API
 - `kernel.pid_max = 65535` — защита от повторения бага `MTProxy` на высоких PID
 
 Быстрый старт:
