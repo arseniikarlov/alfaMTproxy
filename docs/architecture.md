@@ -37,9 +37,11 @@ flowchart TB
             SECRET["/etc/mtproxy/secret"]
             TOKEN["/etc/mtproxy/dashboard-token"]
             TGCONF["/opt/mtproxy-data/*"]
+            SYSCTL["/etc/sysctl.d/60-mtproxy-reliability.conf"]
             INSTALL --> SECRET
             INSTALL --> TOKEN
             INSTALL --> TGCONF
+            INSTALL --> SYSCTL
         end
 
         subgraph RUNTIME["Runtime services"]
@@ -47,6 +49,7 @@ flowchart TB
             MTSVC["mtproxy.service"]
             COLSVC["mtproxy-unique-collector.service"]
             DASHSVC["mtproxy-dashboard.service"]
+            WATCHDOG["mtproxy-watchdog.timer"]
         end
 
         subgraph DATA["Data layer"]
@@ -70,6 +73,7 @@ flowchart TB
         INSTALL --> MTSVC
         INSTALL --> COLSVC
         INSTALL --> DASHSVC
+        INSTALL --> WATCHDOG
         SECRET --> MTSVC
         TGCONF --> MTSVC
         TOKEN --> DASHSVC
@@ -81,6 +85,9 @@ flowchart TB
         DASHSVC --> DB
         DASHSVC --> API
         DASHSVC --> UI
+        WATCHDOG --> MTSVC
+        WATCHDOG --> COLSVC
+        WATCHDOG --> DASHSVC
     end
 
     subgraph USERS["Пользователи"]
@@ -115,8 +122,8 @@ flowchart TB
 
     class ENV,DEPLOY,CLI local;
     class REPO git;
-    class INSTALL,SECRET,TOKEN,TGCONF install;
-    class MTSVC,COLSVC,DASHSVC,PROXY,LOCALSTATS runtime;
+    class INSTALL,SECRET,TOKEN,TGCONF,SYSCTL install;
+    class MTSVC,COLSVC,DASHSVC,WATCHDOG,PROXY,LOCALSTATS runtime;
     class TCPDUMP,DB,STATS data;
     class API,UI web;
     class TGCLIENT,BROWSER user;
@@ -130,12 +137,14 @@ flowchart TB
 3. Installer ставит `MTProxy`, создает `systemd`-сервисы и сохраняет:
    - `secret` прокси
    - `dashboard token`
+   - `sysctl`-защиту для `pid_max`
 4. `mtproxy.service` поднимает `MTProxy` на внешнем порту `443`.
 5. Telegram-клиенты подключаются к `MTProxy`, а тот проксирует трафик в `Telegram DCs`.
 6. `mtproxy-unique-collector.service` через `tcpdump` ловит входящие `TCP SYN` на порт прокси и пишет уникальные IP в `SQLite`.
 7. `mtproxy-dashboard.service` читает `SQLite`, отдает HTML-дашборд и API `/api/metrics`.
-8. Браузер опрашивает API каждые `5` секунд и обновляет экран.
-9. Локальный `scripts/mtproxy-metric.sh` при необходимости читает ту же метрику через `SSH`.
+8. `mtproxy-watchdog.timer` раз в минуту проверяет `mtproxy`, `collector`, `dashboard`, порты и health endpoints, а при сбое делает auto-heal через `systemctl restart`.
+9. Браузер опрашивает API каждые `5` секунд и обновляет экран.
+10. Локальный `scripts/mtproxy-metric.sh` при необходимости читает ту же метрику через `SSH`.
 
 ## Main Components
 
@@ -146,6 +155,7 @@ flowchart TB
 | `mtproxy.service` | основной `MTProxy` процесс |
 | `mtproxy-unique-collector.service` | сбор уникальных IP из сетевого трафика |
 | `mtproxy-dashboard.service` | HTTP UI и JSON API |
+| `mtproxy-watchdog.timer` | периодическая health-проверка и auto-heal |
 | `clients.sqlite` | хранилище агрегированной метрики |
 | `mtproxy-unique-stats` | CLI для чтения метрики на сервере |
 
@@ -155,6 +165,7 @@ flowchart TB
 |---|---|
 | `/etc/mtproxy/secret` | `MTProto secret` для Telegram proxy |
 | `/etc/mtproxy/dashboard-token` | токен доступа к веб-дашборду |
+| `/etc/sysctl.d/60-mtproxy-reliability.conf` | `pid_max` защита для стабильного старта `MTProxy` |
 | `/var/lib/mtproxy-metrics/clients.sqlite` | уникальные IP, `first_seen`, `last_seen`, `hits` |
 | `/opt/mtproxy-data/proxy-secret` | официальный Telegram proxy secret blob |
 | `/opt/mtproxy-data/proxy-multi.conf` | конфиг Telegram DC для MTProxy |

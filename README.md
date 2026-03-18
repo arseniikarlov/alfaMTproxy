@@ -1,6 +1,6 @@
 # MTProxy Infra
 
-Воспроизводимая раскатка `Telegram MTProxy` на новый сервер с метрикой уникальных клиентских `IP`, GeoIP-городом и браузерным live-дашбордом.
+Воспроизводимая раскатка `Telegram MTProxy` на новый сервер с метрикой уникальных клиентских `IP`, GeoIP-городом, браузерным live-дашбордом и базовым auto-heal watchdog.
 
 <p align="center">
   <a href="docs/architecture.md">
@@ -10,12 +10,20 @@
 
 Что внутри:
 
-- `scripts/install-mtproxy-remote.sh` — ставит `MTProxy`, `systemd`-юниты, сборщик метрики, GeoIP-кэш и HTTP-дашборд
+- `scripts/install-mtproxy-remote.sh` — ставит `MTProxy`, `systemd`-юниты, сборщик метрики, GeoIP-кэш, HTTP-дашборд и watchdog
 - `scripts/deploy-mtproxy.sh` — локально копирует installer на сервер и запускает его по `SSH`
 - `scripts/mtproxy-metric.sh` — локально читает метрику с сервера
 - `docs/mtproxy.md` — короткая инструкция
 - `docs/architecture.md` — схема архитектуры
 - `.mtproxy.env.example` — шаблон локального конфига
+
+Что на сервере появляется после раскатки:
+
+- `mtproxy.service` — основной прокси
+- `mtproxy-unique-collector.service` — сбор уникальных IP
+- `mtproxy-dashboard.service` — web UI и API
+- `mtproxy-watchdog.service` + `mtproxy-watchdog.timer` — периодическая health-проверка и auto-heal
+- `kernel.pid_max = 65535` — защита от повторения бага `MTProxy` на высоких PID
 
 Быстрый старт:
 

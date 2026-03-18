@@ -12,12 +12,16 @@ METRICS_DIR="${METRICS_DIR:-/var/lib/mtproxy-metrics}"
 SECRET_DIR="${SECRET_DIR:-/etc/mtproxy}"
 SECRET_FILE="${SECRET_FILE:-${SECRET_DIR}/secret}"
 DASHBOARD_TOKEN_FILE="${DASHBOARD_TOKEN_FILE:-${SECRET_DIR}/dashboard-token}"
+SYSCTL_FILE="/etc/sysctl.d/60-mtproxy-reliability.conf"
 COLLECTOR_BIN="/usr/local/bin/mtproxy_unique_collector.py"
 STATS_BIN="/usr/local/bin/mtproxy-unique-stats"
 DASHBOARD_BIN="/usr/local/bin/mtproxy-dashboard"
+WATCHDOG_BIN="/usr/local/bin/mtproxy-watchdog"
 COLLECTOR_SERVICE="/etc/systemd/system/mtproxy-unique-collector.service"
 MTPROXY_SERVICE="/etc/systemd/system/mtproxy.service"
 DASHBOARD_SERVICE="/etc/systemd/system/mtproxy-dashboard.service"
+WATCHDOG_SERVICE="/etc/systemd/system/mtproxy-watchdog.service"
+WATCHDOG_TIMER="/etc/systemd/system/mtproxy-watchdog.timer"
 UPDATE_CRON="/etc/cron.d/mtproxy-update"
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -74,6 +78,11 @@ make -C "${INSTALL_DIR}" -j"$(nproc)"
 install -d -m 755 "${DATA_DIR}" "${METRICS_DIR}" "${SECRET_DIR}"
 curl -fsSL https://core.telegram.org/getProxySecret -o "${DATA_DIR}/proxy-secret"
 curl -fsSL https://core.telegram.org/getProxyConfig -o "${DATA_DIR}/proxy-multi.conf"
+
+cat > "${SYSCTL_FILE}" <<SYSCTL
+kernel.pid_max = 65535
+SYSCTL
+sysctl -q -p "${SYSCTL_FILE}" >/dev/null 2>&1 || sysctl -w kernel.pid_max=65535 >/dev/null 2>&1 || true
 
 if [[ -n "${MTPROXY_SECRET:-}" ]]; then
   SECRET="${MTPROXY_SECRET}"
@@ -1145,7 +1154,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-LimitNOFILE=8192
+LimitNOFILE=65536
 ExecStart=${INSTALL_DIR}/objs/bin/mtproto-proxy -u nobody -p ${INTERNAL_PORT} -H ${PUBLIC_PORT} -S ${SECRET} --aes-pwd ${DATA_DIR}/proxy-secret ${DATA_DIR}/proxy-multi.conf -M ${WORKERS} --http-stats -v
 Restart=on-failure
 RestartSec=5
@@ -1186,6 +1195,99 @@ RestartSec=5
 WantedBy=multi-user.target
 SERVICE
 
+cat > "${WATCHDOG_BIN}" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+
+PUBLIC_PORT="${PUBLIC_PORT}"
+INTERNAL_PORT="${INTERNAL_PORT}"
+DASHBOARD_PORT="${DASHBOARD_PORT}"
+
+log() {
+  logger -t mtproxy-watchdog "\$*"
+  printf '%s\n' "\$*"
+}
+
+is_listening() {
+  local port="\$1"
+  ss -H -ltn "sport = :\${port}" | grep -q .
+}
+
+http_ok() {
+  local url="\$1"
+  curl -fsS --max-time 5 "\${url}" >/dev/null
+}
+
+restart_unit() {
+  local unit="\$1"
+  local reason="\$2"
+  log "\${unit}: \${reason}; restarting"
+  systemctl restart "\${unit}"
+}
+
+if ! systemctl is-active --quiet mtproxy; then
+  restart_unit mtproxy "inactive"
+elif ! is_listening "${PUBLIC_PORT}" || ! is_listening "${INTERNAL_PORT}" || ! http_ok "http://127.0.0.1:${INTERNAL_PORT}/stats"; then
+  restart_unit mtproxy "port or stats check failed"
+fi
+
+if ! systemctl is-active --quiet mtproxy-unique-collector; then
+  restart_unit mtproxy-unique-collector "inactive"
+fi
+
+if ! systemctl is-active --quiet mtproxy-dashboard; then
+  restart_unit mtproxy-dashboard "inactive"
+elif ! is_listening "${DASHBOARD_PORT}" || ! http_ok "http://127.0.0.1:${DASHBOARD_PORT}/healthz"; then
+  restart_unit mtproxy-dashboard "port or healthz check failed"
+fi
+
+sleep 2
+
+if ! systemctl is-active --quiet mtproxy || ! is_listening "${PUBLIC_PORT}" || ! is_listening "${INTERNAL_PORT}" || ! http_ok "http://127.0.0.1:${INTERNAL_PORT}/stats"; then
+  log "mtproxy remains unhealthy after remediation"
+  exit 1
+fi
+
+if ! systemctl is-active --quiet mtproxy-unique-collector; then
+  log "mtproxy-unique-collector remains unhealthy after remediation"
+  exit 1
+fi
+
+if ! systemctl is-active --quiet mtproxy-dashboard || ! is_listening "${DASHBOARD_PORT}" || ! http_ok "http://127.0.0.1:${DASHBOARD_PORT}/healthz"; then
+  log "mtproxy-dashboard remains unhealthy after remediation"
+  exit 1
+fi
+
+log "all checks passed"
+SH
+chmod 755 "${WATCHDOG_BIN}"
+
+cat > "${WATCHDOG_SERVICE}" <<SERVICE
+[Unit]
+Description=Check and heal MTProxy services
+After=network-online.target mtproxy.service mtproxy-unique-collector.service mtproxy-dashboard.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${WATCHDOG_BIN}
+SERVICE
+
+cat > "${WATCHDOG_TIMER}" <<SERVICE
+[Unit]
+Description=Run MTProxy watchdog every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=mtproxy-watchdog.service
+
+[Install]
+WantedBy=timers.target
+SERVICE
+
 cat > "${UPDATE_CRON}" <<CRON
 17 4 * * * root curl -fsSL https://core.telegram.org/getProxySecret -o ${DATA_DIR}/proxy-secret && curl -fsSL https://core.telegram.org/getProxyConfig -o ${DATA_DIR}/proxy-multi.conf && systemctl restart mtproxy
 CRON
@@ -1200,9 +1302,12 @@ systemctl daemon-reload
 systemctl enable --now mtproxy
 systemctl enable --now mtproxy-unique-collector
 systemctl enable --now mtproxy-dashboard
+systemctl enable --now mtproxy-watchdog.timer
+systemctl start mtproxy-watchdog.service
 
 printf '\nProxy link:\nhttps://t.me/proxy?server=%s&port=%s&secret=dd%s\n' "${PUBLIC_HOST}" "${PUBLIC_PORT}" "${SECRET}"
 printf '\nMetric command on server:\n%s --json\n' "${STATS_BIN}"
 printf '\nDashboard link:\nhttp://%s:%s/?token=%s\n' "${PUBLIC_HOST}" "${DASHBOARD_PORT}" "${DASHBOARD_TOKEN}"
+printf '\nWatchdog:\nservice=%s\ntimer=%s\n' "mtproxy-watchdog.service" "mtproxy-watchdog.timer"
 printf '\nCurrent metric snapshot:\n'
 "${STATS_BIN}" --json

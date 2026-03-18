@@ -12,9 +12,11 @@
 - установка `MTProxy` из официального репозитория
 - `systemd`-юниты для прокси и сборщика метрики
 - отдельный HTTP-дашборд с автообновлением
+- watchdog c `systemd timer`, который сам проверяет и переподнимает сервисы
 - сбор уникальных IP по входящим TCP SYN на порт прокси
 - GeoIP city/country enrichment для последних подключений
 - команда просмотра метрики
+- системная защита `kernel.pid_max = 65535`, чтобы `MTProxy` не падал на высоких PID
 
 В git не кладутся:
 
@@ -68,6 +70,7 @@ make mtproxy-deploy HOST=root@SERVER_IP
 
 - готовую ссылку `t.me/proxy`
 - ссылку на web-дашборд
+- статус watchdog
 - текущий снимок метрики
 
 Дашборд открывается по ссылке вида:
@@ -99,6 +102,14 @@ make mtproxy-metric ARGS=--json
 ```bash
 mtproxy-unique-stats
 mtproxy-unique-stats --json
+```
+
+Проверка auto-heal:
+
+```bash
+systemctl status mtproxy-watchdog.timer --no-pager
+systemctl status mtproxy-watchdog.service --no-pager
+journalctl -u mtproxy-watchdog.service -n 50 --no-pager
 ```
 
 В браузере:
