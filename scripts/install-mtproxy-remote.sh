@@ -1242,6 +1242,32 @@ restart_unit() {
   systemctl restart "\${unit}"
 }
 
+unit_state() {
+  systemctl is-active "\$1" 2>/dev/null || echo unknown
+}
+
+port_state() {
+  if is_listening "\$1"; then
+    printf 'up'
+  else
+    printf 'down'
+  fi
+}
+
+build_status_block() {
+  printf 'Server: %s\n' "${PUBLIC_HOST}"
+  printf 'Time: %s\n' "\$(date -Is)"
+  printf 'Proxy endpoint: %s:%s\n' "${PUBLIC_HOST}" "${PUBLIC_PORT}"
+  printf 'Services:\n'
+  printf '• mtproxy: %s\n' "\$(unit_state mtproxy)"
+  printf '• collector: %s\n' "\$(unit_state mtproxy-unique-collector)"
+  printf '• dashboard: %s\n' "\$(unit_state mtproxy-dashboard)"
+  printf 'Ports:\n'
+  printf '• %s: %s\n' "${PUBLIC_PORT}" "\$(port_state "${PUBLIC_PORT}")"
+  printf '• %s: %s\n' "${INTERNAL_PORT}" "\$(port_state "${INTERNAL_PORT}")"
+  printf '• %s: %s\n' "${DASHBOARD_PORT}" "\$(port_state "${DASHBOARD_PORT}")"
+}
+
 send_telegram() {
   local message="\$1"
   local bot_token chat_id
@@ -1267,24 +1293,26 @@ set_state_and_notify() {
   local previous_state=""
   local message=""
   local item
+  local status_block=""
 
   if [[ -f "${WATCHDOG_STATE_FILE}" ]]; then
     previous_state="\$(cat "${WATCHDOG_STATE_FILE}")"
   fi
 
   printf '%s' "\${next_state}" > "${WATCHDOG_STATE_FILE}"
+  status_block="\$(build_status_block)"
 
   if [[ "\${next_state}" == "unhealthy" && "\${previous_state}" != "unhealthy" ]]; then
-    message="[mtproxy] ALERT \${PUBLIC_HOST} \$(date -Is)"
+    message="🚨 MTProxy ALERT"$'\n'"\${status_block}"$'\n'"Issues:"
     for item in "\$@"; do
-      message="\${message}"$'\n'"- \${item}"
+      message="\${message}"$'\n'"• \${item}"
     done
     send_telegram "\${message}"
     return
   fi
 
   if [[ "\${next_state}" == "healthy" && "\${previous_state}" == "unhealthy" ]]; then
-    send_telegram "[mtproxy] RECOVERED \${PUBLIC_HOST} \$(date -Is)"
+    send_telegram "✅ MTProxy RECOVERED"$'\n'"\${status_block}"
   fi
 }
 
