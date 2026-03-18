@@ -17,6 +17,7 @@ PUBLIC_PORT="${PUBLIC_PORT:-443}"
 INTERNAL_PORT="${INTERNAL_PORT:-2398}"
 WORKERS="${WORKERS:-1}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18080}"
+SKIP_APT="${MTPROXY_SKIP_APT:-0}"
 
 if [[ -z "${TARGET}" ]]; then
   echo "usage: $0 user@host" >&2
@@ -43,6 +44,7 @@ REMOTE_ENV=(
   "INTERNAL_PORT=$(printf '%q' "${INTERNAL_PORT}")"
   "WORKERS=$(printf '%q' "${WORKERS}")"
   "DASHBOARD_PORT=$(printf '%q' "${DASHBOARD_PORT}")"
+  "SKIP_APT=$(printf '%q' "${SKIP_APT}")"
 )
 
 if [[ -n "${MTPROXY_SECRET:-}" ]]; then

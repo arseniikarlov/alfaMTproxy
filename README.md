@@ -25,6 +25,7 @@
 - `mtproxy-watchdog.service` + `mtproxy-watchdog.timer` — периодическая health-проверка и auto-heal
 - Telegram-alerts — уведомления о падении и восстановлении через Bot API
 - `kernel.pid_max = 65535` — защита от повторения бага `MTProxy` на высоких PID
+- safe updater Telegram-конфига — без лишнего `restart`, с rollback при неудачном обновлении
 
 Быстрый старт:
 

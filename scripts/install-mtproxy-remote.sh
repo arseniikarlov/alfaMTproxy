@@ -6,6 +6,7 @@ INTERNAL_PORT="${INTERNAL_PORT:-2398}"
 WORKERS="${WORKERS:-1}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18080}"
 DASHBOARD_BIND="${DASHBOARD_BIND:-0.0.0.0}"
+SKIP_APT="${SKIP_APT:-0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/MTProxy}"
 DATA_DIR="${DATA_DIR:-/opt/mtproxy-data}"
 METRICS_DIR="${METRICS_DIR:-/var/lib/mtproxy-metrics}"
@@ -19,6 +20,7 @@ COLLECTOR_BIN="/usr/local/bin/mtproxy_unique_collector.py"
 STATS_BIN="/usr/local/bin/mtproxy-unique-stats"
 DASHBOARD_BIN="/usr/local/bin/mtproxy-dashboard"
 WATCHDOG_BIN="/usr/local/bin/mtproxy-watchdog"
+UPDATE_BIN="/usr/local/bin/mtproxy-update-config"
 WATCHDOG_STATE_FILE="${METRICS_DIR}/watchdog-state"
 COLLECTOR_SERVICE="/etc/systemd/system/mtproxy-unique-collector.service"
 MTPROXY_SERVICE="/etc/systemd/system/mtproxy.service"
@@ -66,8 +68,10 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get update
-apt-get install -y git curl build-essential libssl-dev zlib1g-dev python3 xxd sqlite3 tcpdump
+if [[ "${SKIP_APT}" != "1" ]]; then
+  apt-get update
+  apt-get install -y git curl build-essential libssl-dev zlib1g-dev python3 xxd sqlite3 tcpdump
+fi
 
 if [[ ! -d "${INSTALL_DIR}/.git" ]]; then
   rm -rf "${INSTALL_DIR}"
@@ -1379,6 +1383,106 @@ log "all checks passed"
 SH
 chmod 755 "${WATCHDOG_BIN}"
 
+cat > "${UPDATE_BIN}" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+
+DATA_DIR="${DATA_DIR}"
+SECRET_PATH="${DATA_DIR}/proxy-secret"
+CONFIG_PATH="${DATA_DIR}/proxy-multi.conf"
+INTERNAL_PORT="${INTERNAL_PORT}"
+
+tmp_secret="\$(mktemp)"
+tmp_config="\$(mktemp)"
+backup_secret=""
+backup_config=""
+secret_changed=0
+config_changed=0
+
+cleanup() {
+  rm -f "\${tmp_secret}" "\${tmp_config}"
+  if [[ -n "\${backup_secret}" ]]; then
+    rm -f "\${backup_secret}"
+  fi
+  if [[ -n "\${backup_config}" ]]; then
+    rm -f "\${backup_config}"
+  fi
+}
+trap cleanup EXIT
+
+log() {
+  logger -t mtproxy-update-config "\$*"
+  printf '%s\n' "\$*"
+}
+
+health_ok() {
+  systemctl is-active --quiet mtproxy && curl -fsS --max-time 5 "http://127.0.0.1:${INTERNAL_PORT}/stats" >/dev/null
+}
+
+curl -fsSL https://core.telegram.org/getProxySecret -o "\${tmp_secret}"
+curl -fsSL https://core.telegram.org/getProxyConfig -o "\${tmp_config}"
+
+if [[ ! -s "\${tmp_secret}" || ! -s "\${tmp_config}" ]]; then
+  log "downloaded update files are empty; aborting"
+  exit 1
+fi
+
+if ! cmp -s "\${tmp_secret}" "\${SECRET_PATH}"; then
+  backup_secret="\$(mktemp)"
+  cp "\${SECRET_PATH}" "\${backup_secret}"
+  install -m 644 "\${tmp_secret}" "\${SECRET_PATH}"
+  secret_changed=1
+fi
+
+if ! cmp -s "\${tmp_config}" "\${CONFIG_PATH}"; then
+  backup_config="\$(mktemp)"
+  cp "\${CONFIG_PATH}" "\${backup_config}"
+  install -m 644 "\${tmp_config}" "\${CONFIG_PATH}"
+  config_changed=1
+fi
+
+if (( secret_changed == 0 && config_changed == 0 )); then
+  log "no Telegram config changes; skipping mtproxy restart"
+  exit 0
+fi
+
+if (( secret_changed == 0 && config_changed == 1 )); then
+  log "Telegram routing config changed; staged on disk without mtproxy restart"
+  exit 0
+fi
+
+log "Telegram secret changed; restarting mtproxy to apply update"
+systemctl restart mtproxy
+sleep 2
+
+if health_ok; then
+  log "mtproxy restart succeeded with new Telegram secret/config"
+  exit 0
+fi
+
+log "mtproxy failed health check after Telegram update; rolling back"
+
+if [[ -n "\${backup_secret}" ]]; then
+  install -m 644 "\${backup_secret}" "\${SECRET_PATH}"
+fi
+
+if [[ -n "\${backup_config}" ]]; then
+  install -m 644 "\${backup_config}" "\${CONFIG_PATH}"
+fi
+
+systemctl restart mtproxy
+sleep 2
+
+if health_ok; then
+  log "rollback succeeded; mtproxy restored with previous Telegram config"
+  exit 1
+fi
+
+log "rollback failed; mtproxy still unhealthy"
+exit 1
+SH
+chmod 755 "${UPDATE_BIN}"
+
 cat > "${WATCHDOG_SERVICE}" <<SERVICE
 [Unit]
 Description=Check and heal MTProxy services
@@ -1406,7 +1510,7 @@ WantedBy=timers.target
 SERVICE
 
 cat > "${UPDATE_CRON}" <<CRON
-17 4 * * * root curl -fsSL https://core.telegram.org/getProxySecret -o ${DATA_DIR}/proxy-secret && curl -fsSL https://core.telegram.org/getProxyConfig -o ${DATA_DIR}/proxy-multi.conf && systemctl restart mtproxy
+17 4 * * * root ${UPDATE_BIN}
 CRON
 
 if command -v ufw >/dev/null 2>&1; then
@@ -1424,6 +1528,7 @@ systemctl start mtproxy-watchdog.service
 
 printf '\nProxy link:\nhttps://t.me/proxy?server=%s&port=%s&secret=dd%s\n' "${PUBLIC_HOST}" "${PUBLIC_PORT}" "${SECRET}"
 printf '\nMetric command on server:\n%s --json\n' "${STATS_BIN}"
+printf '\nSafe updater on server:\n%s\n' "${UPDATE_BIN}"
 printf '\nDashboard link:\nhttp://%s:%s/?token=%s\n' "${PUBLIC_HOST}" "${DASHBOARD_PORT}" "${DASHBOARD_TOKEN}"
 printf '\nWatchdog:\nservice=%s\ntimer=%s\n' "mtproxy-watchdog.service" "mtproxy-watchdog.timer"
 printf '\nCurrent metric snapshot:\n'

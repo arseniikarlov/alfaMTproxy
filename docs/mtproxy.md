@@ -14,6 +14,7 @@
 - отдельный HTTP-дашборд с автообновлением
 - watchdog c `systemd timer`, который сам проверяет и переподнимает сервисы
 - Telegram-alerting через Bot API при падении и восстановлении
+- безопасный updater Telegram-конфига без ежедневного слепого `restart`
 - сбор уникальных IP по входящим TCP SYN на порт прокси
 - GeoIP city/country enrichment для последних подключений
 - команда просмотра метрики
@@ -71,11 +72,18 @@ cp .mtproxy.env.example .mtproxy.env
 make mtproxy-deploy HOST=root@SERVER_IP
 ```
 
+Если на сервере уже всё установлено, а `apt` занят или ты хочешь обновить только наши скрипты и `systemd`-юниты:
+
+```bash
+MTPROXY_SKIP_APT=1 ./scripts/deploy-mtproxy.sh root@SERVER_IP
+```
+
 На выходе скрипт печатает:
 
 - готовую ссылку `t.me/proxy`
 - ссылку на web-дашборд
 - статус watchdog
+- путь к safe updater
 - текущий снимок метрики
 
 Дашборд открывается по ссылке вида:
@@ -116,6 +124,21 @@ systemctl status mtproxy-watchdog.timer --no-pager
 systemctl status mtproxy-watchdog.service --no-pager
 journalctl -u mtproxy-watchdog.service -n 50 --no-pager
 ```
+
+Безопасный update Telegram-конфига:
+
+```bash
+/usr/local/bin/mtproxy-update-config
+```
+
+Что он делает:
+
+- скачивает `proxy-secret` и `proxy-multi.conf` во временные файлы
+- сравнивает их с текущими
+- если изменений нет, не трогает `mtproxy`
+- если изменился только `proxy-multi.conf`, обновляет файл на диске без `restart`
+- если изменился `proxy-secret`, делает `restart` только один раз
+- если после такого обновления `mtproxy` не проходит health-check, откатывает старые файлы и поднимает сервис обратно
 
 При заданных `MTPROXY_ALERT_BOT_TOKEN` и `MTPROXY_ALERT_CHAT_ID` watchdog:
 
