@@ -1239,6 +1239,7 @@ restart_unit() {
   local unit="\$1"
   local reason="\$2"
   log "\${unit}: \${reason}; restarting"
+  actions+=("restarted \${unit} (\${reason})")
   systemctl restart "\${unit}"
 }
 
@@ -1303,19 +1304,36 @@ set_state_and_notify() {
   status_block="\$(build_status_block)"
 
   if [[ "\${next_state}" == "unhealthy" && "\${previous_state}" != "unhealthy" ]]; then
-    message="🚨 MTProxy ALERT"$'\n'"\${status_block}"$'\n'"Issues:"
+    message="🚨 MTProxy needs attention"$'\n'"Summary: one or more services did not recover after auto-restart."
+    if (( \${#actions[@]} > 0 )); then
+      message="\${message}"$'\n'"What we did:"
+      for item in "\${actions[@]}"; do
+        message="\${message}"$'\n'"• \${item}"
+      done
+    fi
+    message="\${message}"$'\n'"What went wrong:"
     for item in "\$@"; do
       message="\${message}"$'\n'"• \${item}"
     done
+    message="\${message}"$'\n'"Current status:"$'\n'"\${status_block}"
     send_telegram "\${message}"
     return
   fi
 
   if [[ "\${next_state}" == "healthy" && "\${previous_state}" == "unhealthy" ]]; then
-    send_telegram "✅ MTProxy RECOVERED"$'\n'"\${status_block}"
+    message="✅ MTProxy recovered"$'\n'"Summary: services are healthy again."
+    if (( \${#actions[@]} > 0 )); then
+      message="\${message}"$'\n'"What we did:"
+      for item in "\${actions[@]}"; do
+        message="\${message}"$'\n'"• \${item}"
+      done
+    fi
+    message="\${message}"$'\n'"Current status:"$'\n'"\${status_block}"
+    send_telegram "\${message}"
   fi
 }
 
+actions=()
 issues=()
 
 if ! systemctl is-active --quiet mtproxy; then
@@ -1337,18 +1355,18 @@ fi
 sleep 2
 
 if ! systemctl is-active --quiet mtproxy || ! is_listening "${PUBLIC_PORT}" || ! is_listening "${INTERNAL_PORT}" || ! http_ok "http://127.0.0.1:${INTERNAL_PORT}/stats"; then
-  log "mtproxy remains unhealthy after remediation"
-  issues+=("mtproxy remains unhealthy after remediation")
+  log "mtproxy did not become healthy after auto-restart"
+  issues+=("mtproxy did not become healthy after auto-restart")
 fi
 
 if ! systemctl is-active --quiet mtproxy-unique-collector; then
-  log "mtproxy-unique-collector remains unhealthy after remediation"
-  issues+=("mtproxy-unique-collector remains unhealthy after remediation")
+  log "collector did not become healthy after auto-restart"
+  issues+=("collector did not become healthy after auto-restart")
 fi
 
 if ! systemctl is-active --quiet mtproxy-dashboard || ! is_listening "${DASHBOARD_PORT}" || ! http_ok "http://127.0.0.1:${DASHBOARD_PORT}/healthz"; then
-  log "mtproxy-dashboard remains unhealthy after remediation"
-  issues+=("mtproxy-dashboard remains unhealthy after remediation")
+  log "dashboard did not become healthy after auto-restart"
+  issues+=("dashboard did not become healthy after auto-restart")
 fi
 
 if (( \${#issues[@]} > 0 )); then
